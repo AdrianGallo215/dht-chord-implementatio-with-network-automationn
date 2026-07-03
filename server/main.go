@@ -20,12 +20,10 @@ func Join(cfg *chord.Config, ip string, port int) error {
 	return err
 }
 
-// a implementacao cria numNodes nós lógicos, iniciando no porto cfg.Port e incrementando
-// para cada novo nó. Todos os nós se juntam ao nó bootstrap no cfg.Addr:cfg.Port que fica no
-// config.yaml
 func JoinNNodes(cfg *chord.Config, numNodes int) ([]*chord.Node, error) {
 	nodes := make([]*chord.Node, numNodes)
 
+	// Bootstrap node
 	log.Infof("Starting bootstrap node on %s:%d", cfg.Addr, cfg.Port)
 	bootstrap := chord.CreateChord(cfg)
 	nodes[0] = bootstrap
@@ -40,6 +38,7 @@ func JoinNNodes(cfg *chord.Config, numNodes int) ([]*chord.Node, error) {
 
 		log.Infof("Starting node on port %d joining bootstrap %s:%d", port, baseIP, basePort)
 
+		// Create and join to bootstrap
 		node, err := chord.JoinChord(&newCfg, baseIP, basePort)
 		if err != nil {
 			log.Errorf("error joining node on port %d: %v", port, err)
@@ -47,6 +46,7 @@ func JoinNNodes(cfg *chord.Config, numNodes int) ([]*chord.Node, error) {
 		}
 		nodes[i] = node
 
+		// Small delay to let the node come up
 		time.Sleep(200 * time.Millisecond)
 	}
 
@@ -155,10 +155,10 @@ func main() {
 	cmdJoin.Flags().Int("port", 0, "Port to bind the joining node to (overrides config)")
 
 	var cmdJoinNNodes = &cobra.Command{
-		Use:   "join-n-nodes [num-nodes]",
+		Use: "join-n-nodes [num-nodes]",
 		Short: "Join multiple nodes to an existing chord dht ring",
 		Long:  `join-n-nodes is for create n logical nodes using ports starting from config`,
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			numNodes, err := strconv.Atoi(args[0])
 			if err != nil {

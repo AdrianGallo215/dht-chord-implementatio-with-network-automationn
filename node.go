@@ -3,6 +3,9 @@ package chord
 import (
 	"bytes"
 	"errors"
+	"github.com/cdesiniotis/chord/chordpb"
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 	"io/ioutil"
 	"net"
 	"os"
@@ -11,15 +14,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/cdesiniotis/chord/chordpb"
-	log "github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
 )
 
 // Node implements the Chord GRPC Server interface
 type Node struct {
 	*chordpb.Node
+	chordpb.UnimplementedChordServer
 
 	config *Config
 
@@ -42,17 +42,13 @@ type Node struct {
 	connPool    map[string]*clientConn
 	connPoolMtx sync.RWMutex
 
-	rgs    map[uint64]*ReplicaGroup
-	rgsMtx sync.RWMutex
-	rgFlag int // set to 1 initially, 0 after node sends its first Coordinator Msg
+	rgs 	map[uint64]*ReplicaGroup
+	rgsMtx	sync.RWMutex
+	rgFlag	int		// set to 1 initially, 0 after node sends its first Coordinator Msg
 
 	signalChannel chan os.Signal
 	shutdownCh    chan struct{}
 }
-
-// Node: Representa o estado local de um nó Chord.
-// Contém identificador, ponteiros predecessor/successor, tabela de dedos,
-// lista de sucessores, pool de conexões e estruturas para grupos de réplica.
 
 // Some constants for readability
 var (
@@ -71,9 +67,6 @@ func CreateChord(config *Config) *Node {
 	return n
 }
 
-// CreateChord: Cria o anel Chord inicial. Retorna o nó que será o primeiro
-// membro do anel (será seu próprio successor/predecessor nil).
-
 /* Function: 	JoinChord
  *
  * Description:
@@ -91,9 +84,6 @@ func JoinChord(config *Config, addr string, port int) (*Node, error) {
 	}
 	return n, err
 }
-
-// JoinChord: Junta este nó a um anel Chord existente. Faz lookup do successor
-// inicial e transfere as chaves pelas quais o novo nó passa a ser responsável.
 
 /* Function: 	newNode
  *
@@ -116,8 +106,8 @@ func newNode(config *Config) *Node {
 			serverOpts: config.ServerOpts,
 			dialOpts:   config.DialOpts,
 			timeout:    time.Duration(config.Timeout) * time.Millisecond},
-		rgs:           make(map[uint64]*ReplicaGroup),
-		rgFlag:        1,
+		rgs:		make(map[uint64]*ReplicaGroup),
+		rgFlag: 	1,
 		shutdownCh:    make(chan struct{}),
 		signalChannel: make(chan os.Signal, 1),
 	}
@@ -131,7 +121,7 @@ func newNode(config *Config) *Node {
 
 	// Allocate a RG for us
 	id := BytesToUint64(n.Id)
-	n.rgs[id] = &ReplicaGroup{leaderId: n.Id, data: make(map[string][]byte)}
+	n.rgs[id] = &ReplicaGroup{leaderId:n.Id, data:make(map[string][]byte)}
 
 	// Create a listening socket for the chord grpc server
 	lis, err := net.Listen("tcp", key)
@@ -192,6 +182,7 @@ func newNode(config *Config) *Node {
 		}()
 	}
 
+
 	// Thread 4: Stabilization protocol
 	go func() {
 		ticker := time.NewTicker(time.Duration(n.config.StabilizeInterval) * time.Millisecond)
@@ -240,13 +231,6 @@ func newNode(config *Config) *Node {
 
 	return n
 }
-
-// newNode: inicializa o estado interno e dispara rotinas periódicas:
-// - servidor gRPC
-// - listener de sinais (shutdown)
-// - logger/debug periódicos
-// - stabilize, fixFinger, checkPredecessor (rotinas do protocolo Chord)
-// Comentários específicos nas rotinas explicam as responsabilidades.
 
 /*
  * Function:	shutdown
@@ -395,10 +379,6 @@ func (n *Node) stabilize() {
 	_ = n.NotifyRPC(succ)
 }
 
-// stabilize: rotina periódica que garante consistência dos ponteiros
-// successor/predecessor. Verifica predecessor do successor e notifica-o
-// para que o anel se ajuste após joins/falhas.
-
 /*
  * Function:	updateSuccessorList
  *
@@ -421,7 +401,7 @@ func (n *Node) updateSuccessorList() {
 		if err != nil {
 			log.Errorf("successor failed while calling GetSuccessorListRPC: %v\n", err)
 			// update successor the next entry in successor table
-			if index == n.config.SuccessorListSize-1 {
+			if index == n.config.SuccessorListSize - 1 {
 				break
 			}
 			n.succMtx.Lock()
@@ -437,10 +417,6 @@ func (n *Node) updateSuccessorList() {
 	}
 
 }
-
-// updateSuccessorList: atualiza a lista de sucessores periodicamente.
-// Em caso de falha do successor, substitui-o pelo próximo da lista
-// e reconcilia a nova lista com o successor atual.
 
 /*
  * Function:	reconcileSuccessorList
@@ -491,11 +467,6 @@ func (n *Node) reconcileSuccessorList(succList *chordpb.SuccessorList) {
 
 }
 
-// reconcileSuccessorList: refaz a lista de sucessores usando a lista
-// do successor: pré-pende o successor atual e remove o último.
-// Se houve mudança, inicia eleição de líder do replica group e
-// inicia transferência de réplicas conforme necessário.
-
 /*
  * Function:	findSuccessor
  *
@@ -531,10 +502,6 @@ func (n *Node) findSuccessor(id []byte) (*chordpb.Node, error) {
 	}
 }
 
-// findSuccessor: procura o successor responsável por um id.
-// Usa BetweenRightIncl para checar intervalo e encaminha para
-// o closest preceding node quando necessário (com retries simples).
-
 /*
  * Function:	closestPrecedingNode
  *
@@ -563,7 +530,7 @@ func (n *Node) closestPrecedingNode(id []byte, exclude ...*chordpb.Node) *chordp
 
 	// Look in successor list
 	n.succListMtx.RLock()
-	for i := n.config.SuccessorListSize - 1; i >= 0; i-- {
+	for i := n.config.SuccessorListSize - 1; i >= 0; i--{
 		succListEntry := n.successorList[i]
 		if Contains(exclude, succListEntry) {
 			continue
@@ -592,10 +559,6 @@ func (n *Node) closestPrecedingNode(id []byte, exclude ...*chordpb.Node) *chordp
 	}
 
 }
-
-// closestPrecedingNode: procura no finger table e na successor list
-// o nó mais próximo que precede o id. Retorna o próprio nó se
-// não encontrar candidato confiável.
 
 /*
  * Function:	checkPredecessor
@@ -628,7 +591,7 @@ func (n *Node) checkPredecessor() {
 		n.succListMtx.RUnlock()
 		// send coordinator msg to all
 		log.Infof("In checkPredecessor() - sending coordinator msg: new %d\t old: %d\n", n.Id, pred.Id)
-		for _, node := range succList {
+		for _, node := range  succList {
 			n.RecvCoordinatorMsgRPC(node, n.Id, pred.Id)
 		}
 
@@ -644,10 +607,6 @@ func (n *Node) checkPredecessor() {
 		n.predMtx.Unlock()
 	}
 }
-
-// checkPredecessor: verifica se o predecessor responde; em caso de falha
-// transfere réplicas, remove membro do grupo de réplica e notifica os
-// sucessores sobre a nova configuração (eleição de líder).
 
 /*
  * Function:	initSuccessorList
@@ -702,11 +661,6 @@ func (n *Node) get(key string) ([]byte, error) {
 
 }
 
-// get: recupera o valor associado a uma chave.
-// - localiza o nó responsável (locate)
-// - se for o próprio nó, retorna do datastore local do ReplicaGroup
-// - caso contrário, requisita via RPC ao nó remoto
-
 /*
  * Function:	put
  *
@@ -740,11 +694,6 @@ func (n *Node) put(key string, value []byte) error {
 	}
 }
 
-// put: armazena uma chave no DHT.
-// - localiza o nó responsável
-// - se for local, grava no ReplicaGroup local e replica para o grupo
-// - caso contrário, envia PutRPC ao nó responsável
-
 /*
  * Function:	locate
  *
@@ -760,6 +709,3 @@ func (n *Node) locate(key string) (*chordpb.Node, error) {
 	}
 	return node, nil
 }
-
-// locate: calcula hash da chave (GetPeerID) e usa findSuccessor
-// para identificar o nó responsável pela chave no anel.

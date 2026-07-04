@@ -259,6 +259,26 @@ func (n *Node) LocateRPC(other *chordpb.Node, key string) (*chordpb.Node, error)
 	return resp, err
 }
 
+// RunRPC invokes the Run RPC on "other," asking it to execute command against
+// the device at host (host doubles as the DHT key and the device to connect to).
+// Uses a longer timeout than the other RPCs since it waits on a real network
+// automation round trip (SSH connect + command execution) rather than a local
+// ring operation.
+func (n *Node) RunRPC(other *chordpb.Node, host string, command string) (*chordpb.Value, error) {
+	client, err := n.getChordClient(other)
+	if err != nil {
+		log.Errorf("error getting Chord Client: %v", err)
+		return nil, err
+	}
+	req := &chordpb.KV{Key: host, Value: []byte(command)}
+
+	timeout := time.Duration(n.config.AutomationTimeout)*time.Second + 10*time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	resp, err := client.Run(ctx, req)
+	return resp, err
+}
+
 /* Function: 	FindSuccessor
  *
  * Description:
@@ -525,4 +545,19 @@ func (n *Node) Put(context context.Context, kv *chordpb.KV) (*chordpb.Empty, err
  */
 func (n *Node) Locate(context context.Context, key *chordpb.Key) (*chordpb.Node, error) {
 	return n.locate(key.Key)
+}
+
+/* Function: 	Run
+ *
+ * Description:
+ * 		Implementation of Run RPC. kv.Key is the device host/IP (and DHT key),
+ * 		kv.Value is the command to execute.
+ */
+func (n *Node) Run(context context.Context, kv *chordpb.KV) (*chordpb.Value, error) {
+	val, err := n.run(kv.Key, string(kv.Value))
+	if err != nil {
+		return nil, err
+	}
+
+	return &chordpb.Value{Value: val}, nil
 }

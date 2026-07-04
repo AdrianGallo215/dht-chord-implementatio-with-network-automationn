@@ -1,166 +1,114 @@
-﻿# Chord DHT
-Uma tabela de espalhamento distribuída (DHT) usando o protocolo de lookup Chord, implementada em Go.
+# Chord DHT + Network Automation
 
-## Objetivos
-- Implementar uma DHT funcional com tolerancia a falhas de nós caídos
-- Implementar o protocolo Chord para lookup eficiente de nós fisicos em diferentes regioes 
-- Estender o Chord com replicação de dados para aumentar a disponibilidade
-- Fazer testes de rendimento
-- Aprender gRPC e protocol buffers
+Una tabla hash distribuida (DHT) con el protocolo Chord, implementada en Go con gRPC, extendida
+para que cada nodo del anillo también pueda ejecutar comandos de automatización de red (Netmiko)
+contra dispositivos Cisco.
 
-## Modificacoes
-O node.go foi modificado para ter en cuenta a latencia de regioes longas e evitar a condicao de carrera. Tambem se implemento o join de n nós apos da conexao do nó físico para automatizar o levantamento de n nós locais.
 
-## Pré-requisitos
-É necessário ter o Go na versão 1.24 ou superior instalado na máquina para construir o projeto.
+## Estructura del repo
 
-## Compilação
-Para compilar o servidor e o cliente do chord, execute:
 ```
-make server
-make client
+.
+├── *.go                    # Núcleo del DHT: lookup, replicación, RPC, Run (paquete "chord")
+├── chordpb/                # Definiciones y código generado de gRPC/protobuf
+├── server/                 # CLI del servidor (crear/unir nodos al anillo)
+├── client/                 # CLI del cliente (put/get/locate/run)
+├── network-automation/      # Script Netmiko + Dockerfile/compose para el subsistema de automatización
+├── scripts/                 # Build, despliegue en GCP, demos y análisis de resultados
+└── Dockerfile               # Imagen del nodo Chord (Go + python3/netmiko)
 ```
- # Chord DHT
-Uma tabela de dispersão distribuída (DHT) usando o protocolo de lookup Chord, implementada em Go.
 
+## Requisitos
 
-## Objetivos
+- Go 1.21 o superior.
+- Para la función `run` (automatización de red): `python3` y el paquete `netmiko` instalados
+  donde corra el nodo.
+- Para regenerar los `.proto` (opcional, solo si los modificas): `protoc` + los plugins que indica
+  `gen_pb.sh`.
 
-- Implementar uma DHT funcional com tolerância a falhas (nós que caem/reiniciam).
-- Implementar o protocolo Chord para lookup eficiente de nós físicos em diferentes regiões.
-- Estender o Chord com replicação de dados para aumentar a disponibilidade.
-- Realizar testes de desempenho e coletar métricas.
-- Aprender e usar gRPC e Protocol Buffers para comunicação RPC.
-
-## Modificações recentes
-
-- `node.go` foi ajustado para considerar a latência entre regiões e reduzir condições de corrida.
-- Implementado procedimento para criar múltiplos nós lógicos em um nó físico (script em `experiments/`) para facilitar testes locais.
-
-## Pré-requisitos
-
-- Go 1.24 ou superior instalado.
-- `make` disponível (para executar `make server` / `make client`).
-
-## Compilação
-
-Para compilar o servidor e o cliente, execute:
+## Compilar
 
 ```bash
-make server
-make client
+make server      # genera server/chord
+make client      # genera client/chord
 ```
 
-Após a compilação os executáveis `chord` serão criados nas pastas `server/` e `client/`.
+## Configurar
 
-No Windows PowerShell, após compilar, você pode executar os binários com:
-
-```powershell
-.\server\chord.exe create
-.\client\chord.exe put <key> <val>
-```
-
-Se preferir rodar sem compilar (apenas para testes):
-
-```bash
-go run server/main.go -- <args>
-go run client/main.go -- <args>
-```
-
-## Configuração
-
-### Servidor
-
-Edite `./server/config.yaml` com as informações do servidor (IP, porta, logging). Exemplo:
-
+### Servidor — `server/config.yaml`
 ```yaml
-addr: 172.0.0.1
+addr: 127.0.0.1
 port: 8001
 logging: false
 ```
 
-Observação sobre redes: se for usar nós físicos em diferentes regiões na mesma VPC, prefira IPs internos para tráfego entre nós; para clientes externos use o IP público/externo do servidor que atua como ponto de entrada.
-
-### Cliente
-
-Edite `./client/config.yaml` com o endereço do servidor Chord a receber as requisições. Exemplo:
-
+### Cliente — `client/config.yaml`
 ```yaml
-addr: 34.58.253.117:8001
+addr: 127.0.0.1:8001   # nodo del anillo al que se conecta el cliente
 ```
 
-## Execução
+## Levantar el anillo
 
-### Servidor
-
-Criar um novo anel Chord (no nó inicial):
-
+Crear el primer nodo (arranca un anillo nuevo):
 ```bash
 ./server/chord create
 ```
 
-Entrar em um anel existente (informe IP e porta de um nó do anel):
-
+Unir un nodo nuevo a un anillo existente:
 ```bash
-./server/chord join <ip> <port>
+./server/chord join <ip> <puerto>
 ```
 
-Para levantar múltiplos nós lógicos em um mesmo nó físico (útil para testes locais), use o script `experiments/n_nodes.sh`. Exemplo:
-
+Levantar N nodos de una vez (útil para pruebas locales):
 ```bash
-./experiments/n_nodes.sh -n <numero_de_nos> -i <ip_do_host> -p <porta_inicial>
+./server/chord join-n-nodes 4
 ```
 
-> O script cria várias instâncias locais variando portas a partir de `<porta_inicial>`.
+Todos aceptan `--addr` / `--port` para sobreescribir la config.
 
-### Cliente
-
-Inserir um par chave-valor na DHT:
+## Usar el cliente
 
 ```bash
-./client/chord put <key> <val>
+./client/chord put <clave> <valor>              # guarda un par clave-valor
+./client/chord get <clave>                      # lee un valor
+./client/chord locate <clave>                   # muestra qué nodo es dueño de la clave (debug)
+./client/chord run <dispositivo> <comando>      # ejecuta <comando> en <dispositivo> vía la DHT
 ```
 
-Obter o valor associado a uma chave:
+`run` enruta la petición al nodo dueño de `hash(dispositivo)`, que ejecuta el comando por SSH
+(Netmiko) y cachea el resultado en el mismo almacén replicado que usan `put`/`get` — si luego
+haces `get <dispositivo>`, obtienes la última salida cacheada.
+
+## Automatización de red (`network-automation/`)
+
+Ese directorio contiene `netmiko-runner.py` (el script que ejecuta los comandos SSH) y su propio
+`Dockerfile`/`docker-compose.yml` para levantar el anillo en contenedores. Las credenciales viven
+en `network-automation/.env` (variables `NETMIKO_*`) y nunca viajan por la red Chord — cada nodo
+las lee de su propio entorno.
+
+## Tests
 
 ```bash
-./client/chord get <key>
+make test          # go test -v (paquete raíz)
+go test ./... -v   # todos los paquetes
 ```
 
-Localizar (debug) o nó responsável por uma chave:
+## Experimentos (ver que todo funciona)
+
+La forma rápida de comprobar el sistema de punta a punta:
 
 ```bash
-./client/chord locate <key>
+./scripts/experiments/run-all.sh            # todo (automatización contra el dispositivo real)
+MODE=mock ./scripts/experiments/run-all.sh  # todo sin hardware ni credenciales
 ```
 
-## Desenvolvimento local e testes
+Levanta anillos locales y verifica: formación del anillo, put/get distribuido, tolerancia a
+fallos (mata un nodo y comprueba que el dato sobrevive) y automatización de red sobre la DHT.
+Detalles y perillas en `scripts/experiments/README.md`.
 
-Scripts úteis em `experiments/`:
+## Scripts adicionales
 
-- `n_nodes.sh`: levanta `n` nós locais em portas sequenciais.
-- `make_keys.sh`: gera e insere várias chaves no sistema para testes de carga.
-- `client_test.sh`: realiza `k` consultas `get` em um anel com `n` nós e grava tempos de resposta em CSV (em `experiments/csv/`).
-
-## Métricas e resultados
-
-- Os scripts de teste coletam tempos de resposta por consulta e exportam para CSV em `experiments/csv/`.
-- Métrica básica usada: tempo médio de resposta para 10 buscas aleatórias (média utilizada para confirmar comportamento esperado de complexidade O(log n) em buscas).
-
-## Soluções e troubleshooting
-
-- Se o nó falhar ao entrar no anel, verifique `./server/config.yaml` (IP/porta) e se a porta está livre.
-- Para problemas de rede entre regiões, confirme regras de firewall/VPC e se o tráfego interno usa IPs privados.
-- Se observar condições de corrida em ambiente de alta latência, aumentar tempos de retry/timeouts no `config.yaml` e garantir ordenação de operações de join/replicação.
-- Para testes com muitos nós (>20), assegure recursos de VM (memória/CPU) suficientes; é recomendado usar múltiplas VMs ou containers para simular latência de rede real.
-
-## Conclusões
-
-- A implementação suporta realocação de responsabilidades quando nós saem do anel.
-- Recomenda-se máquinas com memória e CPU adequadas para levantar >20 nós simultâneos.
-- Testes em rede real mostram latências maiores que testes locais
-
-## Localização dos arquivos importantes
-
-- Código principal: `node.go`, `server/`, `client/`.
-- Scripts de experimento: `experiments/`.
-- Protobufs/gRPC: `chordpb/`.
+`scripts/` contiene herramientas adicionales, cada una con su propio README:
+- `scripts/build/` : build alternativo
+- `scripts/deployment/` : despliegue para VMs de Cloud
+- `scripts/experiments/` : suite de experimentos de correctitud

@@ -1,73 +1,47 @@
-# docker-compose.yml
-#
-# Corre esto DENTRO de la DEVASC VM (después de `git pull` del repo), no en
-# tu Windows -- ahí es donde Docker sí tiene ruta directa al CR1000v por el
-# Adaptador 2 host-only.
-#
-# -----------------------------------------------------------------------
-# PROBLEMAS MÁS PROBABLES AL LEVANTAR ESTO Y CÓMO RESOLVERLOS
-# -----------------------------------------------------------------------
-#
-# 1) Un contenedor no puede alcanzar al CR1000v aunque el host (la VM) sí puede
-#    Causa: por defecto, Docker usa una red bridge propia (172.x.x.x) que SÍ
-#    debería poder salir por NAT de iptables hacia la red host-only, pero
-#    algunas distros minimalistas de la VM DEVASC traen `iptables`/`ip_forward`
-#    deshabilitado.
-#    Solución: dentro de la VM, revisa:
-#         sysctl net.ipv4.ip_forward     # debe ser 1
-#         sudo sysctl -w net.ipv4.ip_forward=1   # si no lo está
-#
-# 2) "can't start new thread" / contenedor se cae en corridas largas
-#    Causa: el punto (6) del mapa de errores de netmiko_runner.py -- pero
-#    esta vez el límite es el DEL CONTENEDOR, no el de la VM. Por eso
-#    definimos `ulimits: nproc:` explícito abajo para cada servicio, más
-#    generoso que el default de Docker.
-#
-# 3) Los nodos Chord no se ven entre sí
-#    Causa: si Ivett usa IPs fijas en vez de nombres de servicio de Docker
-#    para el "join" del anillo, va a fallar porque las IPs de los
-#    contenedores cambian entre corridas. Deben usar los nombres de
-#    servicio (ej. "chord-node-1") como si fueran hostnames -- Docker
-#    Compose los resuelve automáticamente dentro de la red `chord_net`.
-#
-# 4) Falta memoria al levantar varios nodos + CR1000v + VirtualBox a la vez
-#    Causa: punto (7) del mapa de errores. Si la VM se queda sin RAM, Docker
-#    empieza a matar contenedores (OOM killer) sin avisos claros.
-#    Solución: si tienes que recortar, reduce a 2 nodos Chord en vez de 4
-#    para la demo -- es suficiente para mostrar routing + replicación.
-#
-# 5) El build del servicio "network-automation" tarda o falla
-#    Ver los comentarios detallados en el Dockerfile de esa carpeta.
-# -----------------------------------------------------------------------
-
 networks:
   chord_net:
     driver: bridge
 
 services:
 
-  # ---------------------------------------------------------------------
-  # NODOS CHORD (código/Dockerfile de Ivett -- ajusta el "build:" al path
-  # real de su carpeta una vez que suba su Dockerfile al repo)
-  # ---------------------------------------------------------------------
   chord-node-1:
     build:
-      context: ./chord-node   # <-- placeholder: carpeta con el Dockerfile de Ivett
+      context: ..
+      dockerfile: Dockerfile
     container_name: chord-node-1
-    command: ["create"]        # primer nodo: crea el anillo
+    hostname: chord-node-1
+    command: ["create"]
+    volumes:
+      - ./netmiko-runner.py:/opt/automation/netmiko-runner.py:ro
+      - ./config-node1.yaml:/app/config.yaml:ro
+    security_opt:
+      - seccomp:unconfined
+    env_file:
+      - .env
     networks:
       - chord_net
+    ports:
+      - "8000:8000"   # para poder usar client/chord desde la VM (fuera de Docker)
     ulimits:
       nproc:
         soft: 4096
         hard: 4096
-    restart: "no"   # evita reinicios infinitos que agraven un problema de hilos/memoria
+    restart: "no"
 
   chord-node-2:
     build:
-      context: ./chord-node
+      context: ..
+      dockerfile: Dockerfile
     container_name: chord-node-2
-    command: ["join", "chord-node-1", "8001"]   # se une al anillo vía nombre de servicio
+    hostname: chord-node-2
+    command: ["join", "chord-node-1", "8000"]
+    volumes:
+      - ./netmiko-runner.py:/opt/automation/netmiko-runner.py:ro
+      - ./config-node2.yaml:/app/config.yaml:ro
+    security_opt:
+      - seccomp:unconfined
+    env_file:
+      - .env
     networks:
       - chord_net
     depends_on:
@@ -80,9 +54,18 @@ services:
 
   chord-node-3:
     build:
-      context: ./chord-node
+      context: ..
+      dockerfile: Dockerfile
     container_name: chord-node-3
-    command: ["join", "chord-node-1", "8001"]
+    hostname: chord-node-3
+    command: ["join", "chord-node-1", "8000"]
+    volumes:
+      - ./netmiko-runner.py:/opt/automation/netmiko-runner.py:ro
+      - ./config-node3.yaml:/app/config.yaml:ro
+    security_opt:
+      - seccomp:unconfined
+    env_file:
+      - .env
     networks:
       - chord_net
     depends_on:
@@ -92,26 +75,3 @@ services:
         soft: 4096
         hard: 4096
     restart: "no"
-
-  # ---------------------------------------------------------------------
-  # CONTENEDOR DE AUTOMATIZACIÓN (netmiko_runner.py)
-  # Si el diseño final es "mismo contenedor que el nodo Go" en vez de
-  # contenedor aparte, este servicio se elimina y su Dockerfile se fusiona
-  # con el de chord-node (ver nota en A1 del plan: confirmar con Ivett).
-  # ---------------------------------------------------------------------
-  network-automation:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: network-automation
-    networks:
-      - chord_net
-    env_file:
-      - .env   # NUNCA subas este archivo a git -- usa .env.example como plantilla
-    ulimits:
-      nproc:
-        soft: 4096
-        hard: 4096
-    # Sin ENTRYPOINT con args fijos -- se invoca puntualmente, ej:
-    #   docker compose run --rm network-automation --command "show ip interface brief"
-    # o el nodo Go lo llama vía `docker exec` / subprocess según el diseño final.

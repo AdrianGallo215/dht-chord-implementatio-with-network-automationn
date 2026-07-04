@@ -1,129 +1,3 @@
-#!/usr/bin/env python3
-"""
-netmiko_runner.py
-
-Ejecuta un comando de solo lectura contra un dispositivo de red vía Netmiko
-y devuelve el resultado como JSON por stdout, para que el nodo Chord (Go)
-lo consuma vía subprocess.
-
-CONTRATO DE SALIDA (siempre una única línea JSON en stdout):
-    Éxito:  {"ok": true,  "output": "<texto>", "error": null,      "error_type": null}
-    Fallo:  {"ok": false, "output": null,      "error": "<msg>",   "error_type": "<categoria>"}
-
-Código de salida del proceso: 0 si ok=true, 1 si ok=false. Los mensajes de
-diagnóstico (causa probable + solución) van a stderr, NUNCA a stdout, para
-no romper el parseo JSON del lado Go.
-
-===========================================================================
-MAPA DE ERRORES CONOCIDOS EN ESTE ENTORNO (DEVASC VM + CSR1000v host-only)
-===========================================================================
-
-1) NetmikoTimeoutException
-   Causa probable:
-     - El CR1000v no ha terminado de arrancar (tarda 5-10 min).
-     - La IP del CR1000v está mal (revisa "show ip interface brief" en su consola).
-     - La DEVASC VM no tiene el Adaptador 2 (host-only) bien configurado,
-       o no coincide el nombre del adaptador host-only con el del CR1000v.
-     - Un firewall/ACL en el propio CR1000v bloquea el puerto 22.
-   Solución:
-     - Repetir manualmente: `ping <IP_CR1000v>` y `ssh <user>@<IP_CR1000v>`
-       desde la terminal de la DEVASC VM (fuera de Docker) antes de reintentar
-       este script. Si eso falla, el problema es de red, no de Netmiko.
-
-2) NetmikoAuthenticationException
-   Causa probable:
-     - Usuario/password incorrectos o no definidos en las variables de entorno.
-     - El CR1000v usa autenticación AAA/TACACS en vez de usuario local.
-     - Requiere "enable secret" y el script no lo está usando cuando el
-       comando lo necesita.
-   Solución:
-     - Verifica credenciales con login manual por SSH.
-     - Revisa `show running-config | include username` en el CR1000v.
-     - Si tu comando necesita modo privilegiado, pasa --secret.
-
-3) SSHException con mensajes tipo "Error reading SSH protocol banner"
-   o "Key exchange algorithm not found" / negociación fallida
-   Causa probable:
-     - Los IOS antiguos (típico en CSR1000v de laboratorio) solo soportan
-       algoritmos de key exchange / cifrado viejos (ej. diffie-hellman-group1-sha1,
-       ssh-rsa) que versiones recientes de Paramiko/cryptography deshabilitan
-       por defecto.
-   Solución:
-     - Este script ya intenta forzar algoritmos legacy automáticamente
-       (ver DISABLED_ALGORITHMS_WORKAROUND más abajo). Si sigue fallando,
-       considera fijar una versión más antigua de paramiko en requirements.txt
-       (ej. paramiko==2.12.0) o habilitar explícitamente SSH v2 con
-       "ip ssh version 2" y algoritmos modernos en el CR1000v si tienes
-       acceso de configuración.
-
-4) ConnectionRefusedError / socket.error (Connection refused)
-   Causa probable:
-     - El servicio SSH no está corriendo en el CR1000v (falta "line vty",
-       falta "transport input ssh", o falta generar las llaves RSA con
-       "crypto key generate rsa").
-   Solución:
-     - Entra por consola serial de VirtualBox al CR1000v y verifica la
-       configuración de "line vty 0 4" y que existan llaves RSA generadas.
-
-5) socket.gaierror (no se puede resolver el hostname)
-   Causa probable:
-     - Pasaste un hostname en vez de una IP y la VM no tiene DNS configurado
-       (frecuente si el adaptador host-only no trae DNS, solo NAT lo trae).
-   Solución:
-     - Usa la IP directa del CR1000v, no un hostname, salvo que hayas
-       configurado resolución DNS manualmente.
-
-6) RuntimeError / threading.ThreadError: "can't start new thread"
-   Causa probable (ESTA ES LA QUE SUELES TENER TÚ EN DEVASC):
-     - El límite de procesos/hilos del usuario (ulimit -u) está muy bajo,
-       típico en VMs con poca RAM/CPU asignada, o porque quedaron sesiones
-       SSH zombie de corridas anteriores que no cerraron el hilo de Paramiko.
-   Solución:
-     - Este script SIEMPRE cierra la conexión en el bloque `finally`
-       (net_connect.disconnect()) para no dejar hilos colgados.
-     - Revisa el límite actual: `ulimit -u` dentro de la VM/contenedor.
-     - Súbelo temporalmente: `ulimit -u 4096` antes de correr el script,
-       o define `ulimits: nproc:` en docker-compose.yml (ya incluido en el
-       compose que te paso).
-     - Si el problema persiste tras varias corridas, reinicia la VM para
-       limpiar hilos huérfanos en vez de seguir depurando en caliente.
-
-7) MemoryError / el proceso muere sin traceback claro (OOM killer)
-   Causa probable:
-     - La DEVASC VM se quedó sin RAM disponible (común si además tienes el
-       CR1000v corriendo en la misma máquina física).
-   Solución:
-     - Revisa RAM libre: `free -h` dentro de la VM.
-     - Cierra procesos innecesarios, o sube la RAM asignada a la VM en
-       VirtualBox (Configuración > Sistema > Memoria base).
-     - Este script hace un chequeo preventivo de RAM antes de conectar
-       (ver check_memory()) y avisa si está por debajo del umbral.
-
-8) Falla al hacer `pip install netmiko` (esto pasa en build de Docker, no
-   en runtime de este script, pero lo documentamos aquí porque es el mismo
-   síntoma: "no puedo conectar a nada")
-   Causa probable:
-     - La DEVASC VM no tiene salida a internet: revisa que el Adaptador 1
-       (NAT) siga habilitado y funcionando -- el Adaptador 2 (host-only) que
-       agregamos NO da internet, solo conecta al CR1000v.
-   Solución:
-     - Dentro de la VM: `ping 8.8.8.8` y `ping pypi.org` para diferenciar
-       problema de DNS vs problema de ruteo.
-     - Si hay internet intermitente, construye la imagen Docker una sola vez
-       y reutilízala (no reconstruyas en cada prueba).
-
-9) Comando ejecutado pero salida vacía o con error de sintaxis IOS
-   Causa probable:
-     - Diferencia de versión de IOS-XE entre lo que asumiste y lo que
-       realmente corre el CR1000v (comandos "show" cambian ligeramente
-       entre versiones).
-   Solución:
-     - Verifica manualmente el comando exacto por SSH antes de automatizarlo.
-     - Este script no intenta "adivinar" sintaxis; refleja el error crudo
-       del dispositivo en el campo "output" aunque no haya excepción Python.
-===========================================================================
-"""
-
 import argparse
 import json
 import os
@@ -131,8 +5,8 @@ import socket
 import sys
 import time
 import traceback
+import threading
 
-# --- Import de Netmiko con mensaje claro si falta instalar ---
 try:
     from netmiko import ConnectHandler
     from netmiko.exceptions import (
@@ -156,11 +30,6 @@ except ImportError:
     SSHException = Exception  # fallback para que el except no rompa
 
 
-# ---------------------------------------------------------------------------
-# Workaround para IOS viejos que solo soportan algoritmos SSH legacy.
-# Netmiko permite pasar argumentos extra de Paramiko vía ConnectHandler.
-# Si tu CR1000v es reciente y no lo necesitas, no hace daño dejarlo.
-# ---------------------------------------------------------------------------
 DISABLED_ALGORITHMS_WORKAROUND = {
     # Descomenta si ves errores de "key exchange algorithm not found":
     # "disabled_algorithms": {"pubkeys": ["rsa-sha2-256", "rsa-sha2-512"]}
@@ -339,7 +208,7 @@ def execute_command(host, port, username, password, secret, command, device_type
             error=f"No se pudo resolver el host: {e}. Ver punto (5) del mapa de errores.",
             error_type="dns",
         )
-    except (RuntimeError, threading_error_types()) as e:
+    except (RuntimeError, threading.ThreadError) as e:
         return build_result(
             False,
             error=f"Error de hilos/procesos del sistema: {e}. Ver punto (6) del "

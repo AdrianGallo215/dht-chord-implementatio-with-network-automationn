@@ -93,12 +93,22 @@ make test          # go test -v (paquete raíz)
 go test ./... -v   # todos los paquetes
 ```
 
+## Experimentos (ver que todo funciona)
+
+La forma rápida de comprobar el sistema de punta a punta:
+
+```bash
+./scripts/experiments/run-all.sh            # todo (automatización contra el dispositivo real)
+MODE=mock ./scripts/experiments/run-all.sh  # todo sin hardware ni credenciales
+```
+
+Levanta anillos locales y verifica: formación del anillo, put/get distribuido, tolerancia a
+fallos (mata un nodo y comprueba que el dato sobrevive) y automatización de red sobre la DHT.
+Detalles y perillas en `scripts/experiments/README.md`.
+
 ## Scripts adicionales
 
-`scripts/` contiene herramientas adicionales, cada una con su propio README: 
-- `scripts/build/` : build
-alternativo
-- `scripts/deployment/` :despliegue para VMs de Cloud
-- `scripts/automation/` :demos y
-experimentos de escalabilidad 
-- `scripts/analysis/` :post-procesa resultados de experimentos
+`scripts/` contiene herramientas adicionales, cada una con su propio README:
+- `scripts/build/` : build alternativo
+- `scripts/deployment/` : despliegue para VMs de Cloud
+- `scripts/experiments/` : suite de experimentos de correctitud

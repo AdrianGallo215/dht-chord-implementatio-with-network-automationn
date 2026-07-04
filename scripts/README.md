@@ -6,12 +6,12 @@ Este directorio contiene todos los scripts de automatización, construcción y d
 
 ```
 scripts/
-├── analysis/            # Post-procesamiento de resultados de experimentos
-│   └── results.py      # Genera métricas/gráficos a partir de results/
-├── automation/          # Scripts de demostración y experimentos
-│   ├── demo.sh         # Demostración del sistema
-│   ├── run-experiments.sh  # Experimentos de escalabilidad
-│   └── README.md       # Documentación de automatización
+├── experiments/         # Suite de experimentos de correctitud del anillo
+│   ├── lib.sh          # Primitivas compartidas (levantar/tumbar anillo, aserciones)
+│   ├── 01..04-*.sh     # Un experimento por archivo
+│   ├── run-all.sh      # Corre todos y muestra resumen PASS/FAIL
+│   ├── mock-runner.py  # Runner de automatización simulado (sin hardware)
+│   └── README.md       # Qué demuestra cada experimento y cómo correrlos
 ├── build/              # Scripts de construcción
 │   ├── build.sh        # Compilación de todos los binarios
 │   └── README.md       # Documentación de construcción
@@ -28,19 +28,15 @@ scripts/
 ./scripts/build/build.sh
 ```
 
-### Demostración Local
+### Correr los experimentos (demostración)
 ```bash
-./scripts/automation/demo.sh
+./scripts/experiments/run-all.sh            # todo (automatización contra el dispositivo real)
+MODE=mock ./scripts/experiments/run-all.sh  # todo sin hardware
 ```
 
 ### Configurar VM de Google Cloud
 ```bash
 ./scripts/deployment/setup-vm.sh
-```
-
-### Experimentos de Escalabilidad
-```bash
-./scripts/automation/run-experiments.sh
 ```
 
 Cada subdirectorio contiene su propio README.md con instrucciones detalladas.

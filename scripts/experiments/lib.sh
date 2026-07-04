@@ -9,9 +9,9 @@
 # esto y llamar a estas funciones (ver README.md).
 #
 # Perillas por variable de entorno (con valores por defecto):
-#   N               numero de nodos del anillo            (default 4)
-#   BASE_PORT       puerto del nodo bootstrap             (default 9100)
-#   WAIT_STABILIZE  segundos de espera de estabilizacion  (default 4)
+#   N          numero de nodos del anillo                          (default 4)
+#   BASE_PORT  puerto del nodo bootstrap                           (default 9100)
+#   WAIT_MAX   segundos maximos a esperar la convergencia del anillo (default 30)
 #
 # Requiere: los binarios server/chord y client/chord (se compilan solos si faltan).
 
@@ -26,7 +26,7 @@ CLIENT="$ROOT/client/chord"
 # --- perillas ---------------------------------------------------------------
 N="${N:-4}"
 BASE_PORT="${BASE_PORT:-9100}"
-WAIT_STABILIZE="${WAIT_STABILIZE:-4}"
+WAIT_MAX="${WAIT_MAX:-30}"
 
 # --- estado interno ---------------------------------------------------------
 RUNDIR=""          # directorio temporal de esta corrida (logs + nodes.txt)
@@ -120,8 +120,63 @@ start_ring() {
     sleep 0.3
   done
 
-  info "Esperando estabilizacion (${WAIT_STABILIZE}s)"
-  sleep "$WAIT_STABILIZE"
+  wait_ring
+}
+
+# alive_ports: imprime (uno por linea) los puertos de nodos que siguen vivos
+# (los de nodes.txt menos los que matamos con kill_node).
+alive_ports() {
+  local port pid k skip
+  while read -r port pid; do
+    skip=0
+    for k in "${KILLED[@]:-}"; do [ "$k" = "$port" ] && skip=1; done
+    [ "$skip" = "0" ] && echo "$port"
+  done < "$RUNDIR/nodes.txt"
+}
+
+# _owner_snapshot KEYS...: imprime el "mapa de duenos" de esas claves visto desde
+# CADA nodo vivo (clave@nodo=dueno ...). Si el anillo aun se mueve o los nodos
+# discrepan, el snapshot cambia entre muestras; cuando deja de cambiar, convergio.
+# Nota: al arrancar, todos los nodos creen que el bootstrap es dueno de todo (sus
+# finger tables aun no se poblaron); esa es una "falsa convergencia" transitoria.
+# Por eso wait_ring exige que el snapshot se mantenga ESTABLE varias muestras y
+# tras un WARMUP inicial que salta ese transitorio.
+_owner_snapshot() {
+  local ports; ports=$(alive_ports)
+  [ -n "$ports" ] || { echo ""; return; }
+  local k p o out=""
+  for k in "$@"; do
+    for p in $ports; do
+      o=$(owner_port "$k" "$p")
+      [ -n "$o" ] || { echo ""; return; }   # nodo cayendose: fuerza reintento
+      out="$out ${k}@${p}=${o}"
+    done
+  done
+  echo "$out"
+}
+
+# wait_ring: espera a que el anillo se estabilice. Salta el transitorio inicial
+# (WARMUP) y luego exige que el mapa de duenos sea IDENTICO durante STABLE_SAMPLES
+# muestras seguidas, o hasta agotar WAIT_MAX. Se usa al levantar el anillo y tras
+# matar un nodo (failover).
+wait_ring() {
+  local probes=(alpha bravo charlie delta echo foxtrot golf hotel)
+  local need="${STABLE_SAMPLES:-3}" warmup="${WARMUP:-5}"
+  info "Esperando estabilizacion del anillo (warmup ${warmup}s, max ${WAIT_MAX}s)"
+  sleep "$warmup"
+  local deadline=$(( SECONDS + WAIT_MAX )) stable=0 prev="__none__" snap
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    snap="$(_owner_snapshot "${probes[@]}")"
+    if [ -n "$snap" ] && [ "$snap" = "$prev" ]; then
+      stable=$(( stable + 1 ))
+      [ "$stable" -ge "$need" ] && { note "anillo estable"; return 0; }
+    else
+      stable=0
+    fi
+    prev="$snap"
+    sleep 1.5
+  done
+  note "aviso: se agoto WAIT_MAX (${WAIT_MAX}s) sin estabilidad total; continuo igual"
 }
 
 # stop_ring: mata todos los nodos de la corrida y limpia. Idempotente.
@@ -154,6 +209,20 @@ get_value() {
 owner_port() {
   local key="$1" port="${2:-$BASE_PORT}"
   client "$port" locate "$key" | grep -oE 'port: [0-9]+' | grep -oE '[0-9]+' | head -n1
+}
+
+# get_expect KEY WANT [PORT] [MAXSECS]: reintenta get(KEY) via PORT hasta leer WANT
+# o agotar MAXSECS (util tras un failover, cuando el nuevo dueno tarda en promover
+# la replica). Imprime el ultimo valor leido; devuelve 0 si coincidio, 1 si no.
+get_expect() {
+  local key="$1" want="$2" port="${3:-$BASE_PORT}" max="${4:-25}"
+  local deadline=$(( SECONDS + max )) got=""
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    got="$(get_value "$key" "$port")"
+    [ "$got" = "$want" ] && { echo "$got"; return 0; }
+    sleep 2
+  done
+  echo "$got"; return 1
 }
 
 # --- fallos -----------------------------------------------------------------

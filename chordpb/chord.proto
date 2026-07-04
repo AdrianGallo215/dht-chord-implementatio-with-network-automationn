@@ -30,6 +30,9 @@ service chord {
     rpc Put(KV) returns (empty) {};
     // Locate the node containing a key
     rpc Locate(Key) returns (Node) {};
+    // Run a read-only command against the device identified by kv.key (host/IP),
+    // executing kv.value (the command) on whichever node owns that key.
+    rpc Run(KV) returns (Value) {};
 }
 
 message empty { }

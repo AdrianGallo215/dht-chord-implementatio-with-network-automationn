@@ -1,4 +1,5 @@
 #consulta en el nodo 2
 #ahora cambiamos a otro nodo que sí esté en el ring - por ejemplo nodo 3
 #addr: 34.58.253.117:8000
-addr: 10.204.0.2:8001
+#addr: 10.204.0.2:8001
+addr: 172.0.0.1:8001

@@ -6,6 +6,8 @@ Este directorio contiene todos los scripts de automatización, construcción y d
 
 ```
 scripts/
+├── analysis/            # Post-procesamiento de resultados de experimentos
+│   └── results.py      # Genera métricas/gráficos a partir de results/
 ├── automation/          # Scripts de demostración y experimentos
 │   ├── demo.sh         # Demostración del sistema
 │   ├── run-experiments.sh  # Experimentos de escalabilidad

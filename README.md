@@ -1,76 +1,104 @@
-﻿# Chord DHT
-A distributed hash table using the Chord lookup protocol, implemented in Go.
+# Chord DHT + Network Automation
 
-A demo can be found [here](https://youtu.be/Ym0kmfGoK8k)
+Una tabla hash distribuida (DHT) con el protocolo Chord, implementada en Go con gRPC, extendida
+para que cada nodo del anillo también pueda ejecutar comandos de automatización de red (Netmiko)
+contra dispositivos Cisco.
 
-## Goals
-- Implement a functioning DHT
-- Implement the Chord protocol for efficient node lookup
-- Extend Chord with data replication to provide increased availability
-- Learn gRPC and protocol buffers
 
-## Prerequisites
-Must have go version 1.12 or greater installed on the host in order to build.
+## Estructura del repo
 
-## Build
-To build the chord server and client, simply run: 
 ```
-make server
-make client
+.
+├── *.go                    # Núcleo del DHT: lookup, replicación, RPC, Run (paquete "chord")
+├── chordpb/                # Definiciones y código generado de gRPC/protobuf
+├── server/                 # CLI del servidor (crear/unir nodos al anillo)
+├── client/                 # CLI del cliente (put/get/locate/run)
+├── network-automation/      # Script Netmiko + Dockerfile/compose para el subsistema de automatización
+├── scripts/                 # Build, despliegue en GCP, demos y análisis de resultados
+└── Dockerfile               # Imagen del nodo Chord (Go + python3/netmiko)
 ```
-The executable named `chord` will be created in both the server and client folders.
 
-## Configuration
-Below are instructions for configuring your chord servers and clients.
+## Requisitos
 
-### Server
-In `./server/config.yaml` specify information about your server, like its ip and port. Here is an example:
+- Go 1.21 o superior.
+- Para la función `run` (automatización de red): `python3` y el paquete `netmiko` instalados
+  donde corra el nodo.
+- Para regenerar los `.proto` (opcional, solo si los modificas): `protoc` + los plugins que indica
+  `gen_pb.sh`.
+
+## Compilar
+
+```bash
+make server      # genera server/chord
+make client      # genera client/chord
 ```
-addr: 172.0.0.1
+
+## Configurar
+
+### Servidor — `server/config.yaml`
+```yaml
+addr: 127.0.0.1
 port: 8001
 logging: false
 ```
-### Client
-In `./client/config.yaml` specify the address of the chord server to send client requests to. Here is an example:
-```
-addr: 172.0.0.1:8001
+
+### Cliente — `client/config.yaml`
+```yaml
+addr: 127.0.0.1:8001   # nodo del anillo al que se conecta el cliente
 ```
 
-## Run
-Below are instructions for running a chord server or client.
+## Levantar el anillo
 
-### Server
-To create a new chord ring:
-```
+Crear el primer nodo (arranca un anillo nuevo):
+```bash
 ./server/chord create
 ```
-To join an existing chord ring:
-```
-./server/chord join <ip> <port>
-```
-### Client
-To put a new key-value pair into the DHT:
-```
-./client/chord put <key> <val>
-```
-To get the value for a key in the DHT:
-```
-./client/chord get <key>
-```
-To locate the node responsible for a key in the DHT (for debugging purposes):
-```
-./client/chord locate <key>
+
+Unir un nodo nuevo a un anillo existente:
+```bash
+./server/chord join <ip> <puerto>
 ```
 
-## Local Development and Testing
-To run multiple chord servers locally, run the test files in `./test`.
- 
-To start node1 listening on 0.0.0.0:8001, run
+Levantar N nodos de una vez (útil para pruebas locales):
+```bash
+./server/chord join-n-nodes 4
 ```
-go run test/node1.go
+
+Todos aceptan `--addr` / `--port` para sobreescribir la config.
+
+## Usar el cliente
+
+```bash
+./client/chord put <clave> <valor>              # guarda un par clave-valor
+./client/chord get <clave>                      # lee un valor
+./client/chord locate <clave>                   # muestra qué nodo es dueño de la clave (debug)
+./client/chord run <dispositivo> <comando>      # ejecuta <comando> en <dispositivo> vía la DHT
 ```
-To start node2 listening on 0.0.0.0:8002, run
+
+`run` enruta la petición al nodo dueño de `hash(dispositivo)`, que ejecuta el comando por SSH
+(Netmiko) y cachea el resultado en el mismo almacén replicado que usan `put`/`get` — si luego
+haces `get <dispositivo>`, obtienes la última salida cacheada.
+
+## Automatización de red (`network-automation/`)
+
+Ese directorio contiene `netmiko-runner.py` (el script que ejecuta los comandos SSH) y su propio
+`Dockerfile`/`docker-compose.yml` para levantar el anillo en contenedores. Las credenciales viven
+en `network-automation/.env` (variables `NETMIKO_*`) y nunca viajan por la red Chord — cada nodo
+las lee de su propio entorno.
+
+## Tests
+
+```bash
+make test          # go test -v (paquete raíz)
+go test ./... -v   # todos los paquetes
 ```
-go run test/node2.go
-```
-There are 5 test files, so this allows you to run 5 separate servers locally.
+
+## Scripts adicionales
+
+`scripts/` contiene herramientas adicionales, cada una con su propio README: 
+- `scripts/build/` : build
+alternativo
+- `scripts/deployment/` :despliegue para VMs de Cloud
+- `scripts/automation/` :demos y
+experimentos de escalabilidad 
+- `scripts/analysis/` :post-procesa resultados de experimentos

@@ -52,8 +52,7 @@ export GOROOT=/usr/local/go
 echo "Compilando proyecto Chord..."
 go mod tidy
 go build -o chord-server ./server
-go build -o chord-client ./client  
-go build -o chord-simulator ./cmd/simulator
+go build -o chord-client ./client
 echo "Compilación completada."
 EOF
 

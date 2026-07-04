@@ -58,6 +58,23 @@ func Put(contact string, key string, val []byte) error {
 	return err
 }
 
+// Run asks the DHT to execute command against the device identified by host.
+// Uses a longer timeout than Get/Put/Locate since it waits on a real network
+// automation round trip (SSH connect + command execution), not just a ring lookup.
+func Run(contact string, host string, command string) (*chordpb.Value, error) {
+	cc, err := GetChordClient(contact)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("error dialing %s - %s\n", contact, err))
+	}
+
+	req := &chordpb.KV{Key: host, Value: []byte(command)}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	val, err := cc.Run(ctx, req)
+	return val, err
+}
+
 func Locate(contact string, key string) (*chordpb.Node, error) {
 	cc, err := GetChordClient(contact)
 	if err != nil {
@@ -145,7 +162,23 @@ func main() {
 		},
 	}
 
+	var cmdRun = &cobra.Command{
+		Use:   "run [device] [command]",
+		Short: "Run a read-only command against a device via the DHT",
+		Long:  `run locates the node responsible for [device] and has it execute [command] against that device, caching the result in the DHT`,
+		Args:  cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			device := args[0]
+			command := args[1]
+			val, err := Run(contact, device, command)
+			if err != nil {
+				log.Fatalf("error calling Run(device, command): %s\n", err)
+			}
+			log.Infof("%s@%s --> %s", command, device, string(val.Value))
+		},
+	}
+
 	var rootCmd = &cobra.Command{Use: "chord"}
-	rootCmd.AddCommand(cmdGet, cmdPut, cmdLocate)
+	rootCmd.AddCommand(cmdGet, cmdPut, cmdLocate, cmdRun)
 	rootCmd.Execute()
 }

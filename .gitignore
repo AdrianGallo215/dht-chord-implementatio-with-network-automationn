@@ -27,3 +27,7 @@ Thumbs.db
 vendor/
 
 # Archivos específicos del proyecto
+CLAUDE.md
+
+# Credenciales / variables de entorno (nunca commitear valores reales)
+.env

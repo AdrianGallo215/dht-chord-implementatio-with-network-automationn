@@ -77,8 +77,9 @@ func defaults() map[string]interface{} {
 		"checkpredecessorinterval": 150,
 		"successorlistsize":        2,
 		"logging":                  true,
-		"enablemetrics":            false,
-		"metricsoutputdir":         "metrics",
+		"automationscript":         "/opt/automation/netmiko-runner.py",
+		"automationinterpreter":    "python3",
+		"automationtimeout":        20,
 	}
 }
 

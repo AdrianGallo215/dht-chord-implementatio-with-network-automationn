@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Makefile alternativo para compilar proyecto Chord
-# Uso: ./build.sh [clean|all|server|client|simulator|test]
+# Uso: ./build.sh [clean|all|server|client|test]
 
 set -e
 
@@ -27,12 +27,6 @@ build_client() {
     echo "✓ chord-client compilado"
 }
 
-build_simulator() {
-    echo "Compilando chord-simulator..."
-    go build -o $BIN_DIR/chord-simulator ./cmd/simulator
-    echo "✓ chord-simulator compilado"
-}
-
 build_all() {
     echo "=== Compilando Proyecto Chord ==="
     
@@ -51,8 +45,7 @@ build_all() {
     # Compilar todos los componentes
     build_server
     build_client
-    build_simulator
-    
+
     echo ""
     echo "=== Compilación Completada ==="
     echo "Binarios disponibles en: $BIN_DIR/"
@@ -82,9 +75,6 @@ case "${1:-all}" in
     "client")
         build_client
         ;;
-    "simulator")
-        build_simulator
-        ;;
     "test")
         run_tests
         ;;
@@ -92,7 +82,7 @@ case "${1:-all}" in
         build_all
         ;;
     *)
-        echo "Uso: $0 [clean|all|server|client|simulator|test]"
+        echo "Uso: $0 [clean|all|server|client|test]"
         exit 1
         ;;
 esac

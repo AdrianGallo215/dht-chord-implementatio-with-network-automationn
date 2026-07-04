@@ -20,6 +20,10 @@ type Config struct {
 	SuccessorListSize int
 
 	Logging 	bool
+
+	AutomationScript      string // path to netmiko-runner.py inside the container
+	AutomationInterpreter string // e.g. "python3"
+	AutomationTimeout     int    // seconds, passed as --timeout to the automation script
 }
 
 func DefaultConfig(addr string, port int) *Config {
@@ -38,6 +42,9 @@ func DefaultConfig(addr string, port int) *Config {
 		CheckPredecessorInterval: 150,
 		SuccessorListSize:        2,
 		Logging:				  true,
+		AutomationScript:         "/opt/automation/netmiko-runner.py",
+		AutomationInterpreter:    "python3",
+		AutomationTimeout:        20,
 	}
 }
 

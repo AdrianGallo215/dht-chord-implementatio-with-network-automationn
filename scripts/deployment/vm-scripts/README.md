@@ -49,7 +49,6 @@ echo "Compilando proyecto..."
 go mod tidy
 go build -o bin/chord-server ./server
 go build -o bin/chord-client ./client  
-go build -o bin/chord-simulator ./cmd/simulator
 
 # Iniciar bootstrap node
 echo "Iniciando bootstrap node en 34.38.96.126:8000..."
@@ -99,7 +98,6 @@ echo "Compilando proyecto..."
 go mod tidy
 go build -o bin/chord-server ./server
 go build -o bin/chord-client ./client
-go build -o bin/chord-simulator ./cmd/simulator
 
 # Verificar conectividad con bootstrap
 echo "Verificando conectividad con bootstrap (34.38.96.126:8000)..."
@@ -156,7 +154,6 @@ echo "Compilando proyecto..."
 go mod tidy
 go build -o bin/chord-server ./server
 go build -o bin/chord-client ./client
-go build -o bin/chord-simulator ./cmd/simulator
 
 # Verificar conectividad con bootstrap
 echo "Verificando conectividad con bootstrap (34.38.96.126:8000)..."

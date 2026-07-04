@@ -19,6 +19,7 @@ import (
 // Node implements the Chord GRPC Server interface
 type Node struct {
 	*chordpb.Node
+	chordpb.UnimplementedChordServer
 
 	config *Config
 

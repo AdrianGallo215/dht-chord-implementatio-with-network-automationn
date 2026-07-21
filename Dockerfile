@@ -33,7 +33,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Matches network-automation/requirements.txt; kept inline so this image
 # doesn't need network-automation/ as part of its build context.
-RUN pip install --no-cache-dir --break-system-packages "netmiko>=4.0,<5.0"
+RUN pip install --no-cache-dir --break-system-packages --progress-bar off "netmiko>=4.0,<5.0"
 
 WORKDIR /app
 COPY --from=builder /out/chord ./chord
